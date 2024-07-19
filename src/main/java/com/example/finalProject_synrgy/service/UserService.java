@@ -2,11 +2,16 @@ package com.example.finalProject_synrgy.service;
 
 import com.example.finalProject_synrgy.dto.UserRequest;
 import com.example.finalProject_synrgy.dto.UserResponse;
+import com.example.finalProject_synrgy.entity.oauth2.User;
+
 import org.springframework.data.domain.Pageable;
+import org.springframework.security.oauth2.common.exceptions.InvalidTokenException;
 
 import java.security.Principal;
 import java.util.List;
 import java.util.UUID;
+
+import javax.mail.MessagingException;
 
 public interface UserService {
 
@@ -19,4 +24,8 @@ public interface UserService {
     UserResponse delete(UUID id);
 
     UserResponse findById(UUID id);
+
+    void sendRegistrationConfirmationEmail(final User user) throws MessagingException;
+
+    boolean verifyUser(final String token) throws InvalidTokenException;
 }

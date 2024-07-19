@@ -3,11 +3,16 @@ package com.example.finalProject_synrgy.controller;
 import io.swagger.v3.oas.annotations.Hidden;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
+
+import com.example.finalProject_synrgy.dto.UserResponse;
 import com.example.finalProject_synrgy.dto.auth.*;
 import com.example.finalProject_synrgy.dto.base.BaseResponse;
 import com.example.finalProject_synrgy.service.AuthService;
+import com.example.finalProject_synrgy.service.UserService;
+
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.oauth2.common.exceptions.InvalidTokenException;
 import org.springframework.util.MultiValueMap;
 import org.springframework.web.bind.annotation.*;
 
@@ -21,6 +26,7 @@ public class AuthController {
 
     @Autowired
     private AuthService authService;
+    private UserService userService;
 
     @Operation(summary = "Register user baru",description = "Mendaftarkan user baru, pastikan tidak ada field duplikasi dengan user yang sudah ada.")
     @PostMapping("register")
@@ -83,5 +89,18 @@ public class AuthController {
     @GetMapping
     public ResponseEntity<?> getCurrentUser(Principal principal) {
         return ResponseEntity.ok(BaseResponse.success(authService.getCurrentUser(principal), "Success Get Current User Login"));
+    }
+
+    @GetMapping("/confirm-email")
+    public ResponseEntity<?> confirmEmail(@RequestParam("token") String token) throws InvalidTokenException {
+        try{
+            if(userService.verifyUser(token)){
+                return ResponseEntity.ok("Your email has been successfully verified.");
+            } else {
+                return ResponseEntity.ok("User details not found. Please login and regenerate the confirmation link.");
+            }
+        } catch (InvalidTokenException e){
+            return ResponseEntity.ok("Link expired or token already verified.");
+        }
     }
 }

@@ -3,22 +3,34 @@ package com.example.finalProject_synrgy.service.impl;
 import lombok.extern.slf4j.Slf4j;
 import com.example.finalProject_synrgy.dto.UserRequest;
 import com.example.finalProject_synrgy.dto.UserResponse;
+import com.example.finalProject_synrgy.entity.oauth2.EmailConfirmationToken;
 import com.example.finalProject_synrgy.entity.oauth2.User;
 import com.example.finalProject_synrgy.mapper.UserMapper;
+import com.example.finalProject_synrgy.repository.EmailConfirmationTokenRepository;
 import com.example.finalProject_synrgy.repository.UserRepository;
+import com.example.finalProject_synrgy.service.EmailService;
 import com.example.finalProject_synrgy.service.UserService;
 import com.example.finalProject_synrgy.service.ValidationService;
+import com.google.api.client.util.Base64;
+
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.domain.Specification;
 import org.springframework.http.HttpStatus;
+import org.springframework.security.crypto.keygen.BytesKeyGenerator;
+import org.springframework.security.crypto.keygen.KeyGenerators;
 import org.springframework.security.crypto.password.PasswordEncoder;
+import org.springframework.security.oauth2.common.exceptions.InvalidTokenException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;
 
+import javax.mail.MessagingException;
 import javax.persistence.criteria.Predicate;
+
+import java.nio.charset.Charset;
 import java.security.Principal;
+import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
@@ -39,6 +51,16 @@ public class UserServiceImpl implements UserService {
 
     @Autowired
     private PasswordEncoder encoder;
+
+    @Autowired
+    private EmailService emailService;
+
+    @Autowired
+    private EmailConfirmationTokenRepository emailConfirmationTokenRepository;
+
+    private static final BytesKeyGenerator DEFAULT_TOKEN_GENERATOR = KeyGenerators.secureRandom(15);
+
+    private static final Charset US_ASCII = Charset.forName("US-ASCII");
 
     @Override
     public UserResponse create(UserRequest userRequest) {
@@ -65,10 +87,12 @@ public class UserServiceImpl implements UserService {
         Specification<User> spec = ((root, query, criteriaBuilder) -> {
             List<Predicate> predicates = new ArrayList<>();
             if (username != null && !username.isEmpty()) {
-                predicates.add(criteriaBuilder.like(criteriaBuilder.lower(root.get("username")), "%" + username.toLowerCase() + "%"));
+                predicates.add(criteriaBuilder.like(criteriaBuilder.lower(root.get("username")),
+                        "%" + username.toLowerCase() + "%"));
             }
             if (emailAddress != null && !emailAddress.isEmpty()) {
-                predicates.add(criteriaBuilder.like(criteriaBuilder.lower(root.get("emailAddress")), "%" + emailAddress.toLowerCase() + "%"));
+                predicates.add(criteriaBuilder.like(criteriaBuilder.lower(root.get("emailAddress")),
+                        "%" + emailAddress.toLowerCase() + "%"));
             }
             return criteriaBuilder.and(predicates.toArray(new Predicate[0]));
         });
@@ -115,7 +139,8 @@ public class UserServiceImpl implements UserService {
     @Override
     @Transactional
     public UserResponse delete(UUID id) {
-        User user = userRepository.findById(id).orElseThrow(() -> new ResponseStatusException(HttpStatus.BAD_REQUEST, "ID User not found"));
+        User user = userRepository.findById(id)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.BAD_REQUEST, "ID User not found"));
         userRepository.delete(user);
 
         return userMapper.toUserResponse(user);
@@ -123,7 +148,42 @@ public class UserServiceImpl implements UserService {
 
     @Override
     public UserResponse findById(UUID id) {
-        User user = userRepository.findById(id).orElseThrow(() -> new ResponseStatusException(HttpStatus.BAD_REQUEST, "ID User not found"));
+        User user = userRepository.findById(id)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.BAD_REQUEST, "ID User not found"));
         return userMapper.toUserResponse(user);
+    }
+
+    @Override
+    public void sendRegistrationConfirmationEmail(User user) throws
+    MessagingException {
+    // Generate the token
+    String tokenValue = new
+    String(Base64.encodeBase64URLSafe(DEFAULT_TOKEN_GENERATOR.generateKey()),
+    US_ASCII);
+    EmailConfirmationToken emailConfirmationToken = new EmailConfirmationToken();
+    emailConfirmationToken.setToken(tokenValue);
+    emailConfirmationToken.setTimeStamp(LocalDateTime.now());
+    emailConfirmationToken.setUser(user);
+    emailConfirmationTokenRepository.save(emailConfirmationToken);
+    // Send email
+    emailService.sendConfirmationEmail(emailConfirmationToken);
+    }
+
+    @Override
+    public boolean verifyUser(String token) throws InvalidTokenException {
+    EmailConfirmationToken emailConfirmationToken =
+    emailConfirmationTokenRepository.findByToken(token);
+    if(Objects.isNull(emailConfirmationToken) ||
+    !token.equals(emailConfirmationToken.getToken())){
+    throw new InvalidTokenException("Token is not valid");
+    }
+    User user = emailConfirmationToken.getUser();
+    if (Objects.isNull(user)){
+    return false;
+    }
+    user.setAccountVerified(true);
+    userRepository.save(user);
+    emailConfirmationTokenRepository.delete(emailConfirmationToken);
+    return true;
     }
 }

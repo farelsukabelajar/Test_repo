@@ -63,15 +63,11 @@ public class User extends BaseDate implements UserDetails {
     private boolean credentialsNonExpired = true;
 
     @ManyToMany(targetEntity = Role.class, cascade = CascadeType.ALL, fetch = FetchType.EAGER)
-    @JoinTable(
-            name = "oauth_user_role",
-            joinColumns = {
-                    @JoinColumn(name = "user_id")
-            },
-            inverseJoinColumns = {
-                    @JoinColumn(name = "role_id")
-            }
-    )
+    @JoinTable(name = "oauth_user_role", joinColumns = {
+            @JoinColumn(name = "user_id")
+    }, inverseJoinColumns = {
+            @JoinColumn(name = "role_id")
+    })
     private List<Role> roles = new ArrayList<>();
 
     @Override
@@ -104,4 +100,7 @@ public class User extends BaseDate implements UserDetails {
     private String phoneNumber;
 
     private String bankAccountNumber;
+
+    @Column(name = "account_verified", nullable = false, columnDefinition = "boolean default false")
+    private boolean accountVerified = false;
 }

@@ -49,4 +49,6 @@ public class UserController {
     public ResponseEntity<?> findById(@PathVariable UUID id) {
         return ResponseEntity.ok(BaseResponse.success(userService.findById(id), "Success Get Detail User"));
     }
+
+    
 }
