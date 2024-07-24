@@ -12,11 +12,14 @@ import com.example.finalProject_synrgy.config.EmailTemplate;
 import com.example.finalProject_synrgy.config.SimpleStringUtils;
 import com.example.finalProject_synrgy.dto.auth.*;
 import com.example.finalProject_synrgy.entity.oauth2.User;
+import com.example.finalProject_synrgy.entity.oauth2.EmailConfirmationToken;
 import com.example.finalProject_synrgy.entity.oauth2.Role;
 import com.example.finalProject_synrgy.mapper.AuthMapper;
+import com.example.finalProject_synrgy.repository.EmailConfirmationTokenRepository;
 import com.example.finalProject_synrgy.repository.UserRepository;
 import com.example.finalProject_synrgy.repository.oauth2.RoleRepository;
 import com.example.finalProject_synrgy.service.AuthService;
+import com.example.finalProject_synrgy.service.EmailService;
 import com.example.finalProject_synrgy.service.ValidationService;
 import com.example.finalProject_synrgy.service.oauth.Oauth2UserDetailService;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -36,6 +39,8 @@ import org.springframework.web.server.ResponseStatusException;
 import java.io.IOException;
 import java.security.Principal;
 import java.util.*;
+
+import javax.mail.MessagingException;
 
 @Service
 public class AuthServiceImpl implements AuthService {
@@ -69,11 +74,17 @@ public class AuthServiceImpl implements AuthService {
     @Autowired
     private EmailSender emailSender;
 
-    @Value("${expired.token.password.minute:}")//FILE_SHOW_RUL
+    @Value("${expired.token.password.minute:}") // FILE_SHOW_RUL
     private int expiredToken;
 
     @Autowired
     private Config config;
+
+    @Autowired
+    private EmailConfirmationTokenRepository emailConfirmationTokenRepository;
+
+    @Autowired
+    private EmailService emailService;
 
     @Autowired
     private Oauth2UserDetailService userDetailsService;
@@ -81,7 +92,7 @@ public class AuthServiceImpl implements AuthService {
     @Transactional
     public User register(RegisterRequest request) {
         validationService.validate(request);
-        String[] roleNames = {"ROLE_USER", "ROLE_READ", "ROLE_WRITE"}; // admin
+        String[] roleNames = { "ROLE_USER", "ROLE_READ", "ROLE_WRITE" }; // admin
 
         if (userRepository.existsByUsername(request.getUsername())) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Username already exist");
@@ -110,7 +121,36 @@ public class AuthServiceImpl implements AuthService {
 
         user.setRoles(r);
         user.setPassword(password);
+
+        userRepository.save(user);
+        EmailConfirmationToken token = new EmailConfirmationToken();
+        token.setUser(user);
+        token.setToken(UUID.randomUUID().toString());
+        emailConfirmationTokenRepository.save(token);
+
+        // Send confirmation email
+        try {
+            emailService.sendConfirmationEmail(token);
+        } catch (MessagingException e) {
+            throw new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR, "Failed to send email");
+        }
+
         return userRepository.save(user);
+    }
+
+    @Override
+    public boolean verifyUser(String token) {
+        EmailConfirmationToken emailConfirmationToken = emailConfirmationTokenRepository.findByToken(token);
+        if (emailConfirmationToken == null) {
+            return false;
+        }
+        User user = emailConfirmationToken.getUser();
+        if (user.isEnabled()) {
+            return false; // Token sudah pernah diverifikasi
+        }
+        user.setEnabled(true);
+        userRepository.save(user);
+        return true;
     }
 
     @Transactional
@@ -134,10 +174,9 @@ public class AuthServiceImpl implements AuthService {
                 "&grant_type=password" +
                 "&client_id=my-client-web" +
                 "&client_secret=password";
-        ResponseEntity<Map> response = restTemplateBuilder.build().exchange(url, HttpMethod.POST, null, new
-                ParameterizedTypeReference<Map>() {
-                }
-        );
+        ResponseEntity<Map> response = restTemplateBuilder.build().exchange(url, HttpMethod.POST, null,
+                new ParameterizedTypeReference<Map>() {
+                });
 
         if (response.getStatusCode() == HttpStatus.OK) {
             User user = userRepository.findByEmailAddress(request.getEmailAddress());
@@ -163,7 +202,8 @@ public class AuthServiceImpl implements AuthService {
         if (found == null) {
             throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Email Not Found");
         }
-        String template = subject.equalsIgnoreCase("Register") ? emailTemplate.getRegisterTemplate() : emailTemplate.getResetPassword();
+        String template = subject.equalsIgnoreCase("Register") ? emailTemplate.getRegisterTemplate()
+                : emailTemplate.getResetPassword();
         if (StringUtils.isEmpty(found.getOtp())) {
             User search;
             String otp;
@@ -202,7 +242,8 @@ public class AuthServiceImpl implements AuthService {
 
         String dateToken = config.convertDateToString(user.getOtpExpiredDate());
         if (Long.parseLong(today) > Long.parseLong(dateToken)) {
-            throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Your token is expired. Please Get token again.");
+            throw new ResponseStatusException(HttpStatus.UNAUTHORIZED,
+                    "Your token is expired. Please Get token again.");
         }
         user.setEnabled(true);
         userRepository.save(user);
@@ -227,7 +268,8 @@ public class AuthServiceImpl implements AuthService {
     public Object resetPassword(ResetPasswordRequest request) {
         validationService.validate(request);
         User user = userRepository.findByOtp(request.getOtp());
-        if (user == null) throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Otp Not Valid");
+        if (user == null)
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Otp Not Valid");
 
         user.setPassword(encoder.encode(request.getNewPassword().replaceAll("\\s+", "")));
         user.setOtpExpiredDate(null);
@@ -258,7 +300,8 @@ public class AuthServiceImpl implements AuthService {
         String accessToken = map.get("accessToken");
 
         GoogleCredential credential = new GoogleCredential().setAccessToken(accessToken);
-        Oauth2 oauth2 = new Oauth2.Builder(new NetHttpTransport(), new JacksonFactory(), credential).setApplicationName("Oauth2").build();
+        Oauth2 oauth2 = new Oauth2.Builder(new NetHttpTransport(), new JacksonFactory(), credential)
+                .setApplicationName("Oauth2").build();
         Userinfoplus profile;
         try {
             profile = oauth2.userinfo().get().execute();
@@ -270,7 +313,8 @@ public class AuthServiceImpl implements AuthService {
         if (null != user) {
             if (!user.isEnabled()) {
                 sendEmailOtp(new EmailRequest(user.getEmailAddress()), "Activate Account");
-                throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Your Account is disable. Please chek your email for activation.");
+                throw new ResponseStatusException(HttpStatus.UNAUTHORIZED,
+                        "Your Account is disable. Please chek your email for activation.");
             }
 
             String oldPassword = user.getPassword();
@@ -286,8 +330,9 @@ public class AuthServiceImpl implements AuthService {
                     "&client_id=my-client-web" +
                     "&client_secret=password";
             System.out.println(url);
-            ResponseEntity<Map> response = restTemplateBuilder.build().exchange(url, HttpMethod.POST, null, new ParameterizedTypeReference<Map>() {
-            });
+            ResponseEntity<Map> response = restTemplateBuilder.build().exchange(url, HttpMethod.POST, null,
+                    new ParameterizedTypeReference<Map>() {
+                    });
 
             if (response.getStatusCode() == HttpStatus.OK) {
                 user.setPassword(oldPassword);
@@ -295,13 +340,12 @@ public class AuthServiceImpl implements AuthService {
                 return authMapper.toLoginResponse(response);
             }
         } else {
-//            register
+            // register
             return register(new RegisterRequest(
                     profile.getEmail(),
                     profile.getEmail(),
                     profile.getId(),
-                    "","",""
-            ));
+                    "", "", ""));
         }
         return user;
     }

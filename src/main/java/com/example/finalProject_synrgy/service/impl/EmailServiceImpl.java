@@ -24,8 +24,8 @@ public class EmailServiceImpl implements EmailService {
         // MIME - HTML message
         MimeMessage message = sender.createMimeMessage();
         MimeMessageHelper helper = new MimeMessageHelper(message, true);
-        helper.setTo(emailConfirmationToken.getUser().getUsername());
-        helper.setSubject("Confirm you E-Mail - MFA Application Registration");
+        helper.setTo(emailConfirmationToken.getUser().getEmailAddress());
+        helper.setSubject("Confirm your E-Mail - Registration");
         helper.setText("<html>" +
                 "<body>" +
                 "<h2>Dear " + emailConfirmationToken.getUser().getUsername() + ",</h2>"
@@ -33,7 +33,7 @@ public class EmailServiceImpl implements EmailService {
                 "Please click on below link to confirm your account."
                 + "<br/> " + generateConfirmationLink(emailConfirmationToken.getToken()) + "" +
                 "<br/> Regards,<br/>" +
-                "MFA Registration team" +
+                "Registration team" +
                 "</body>" +
                 "</html>", true);
 

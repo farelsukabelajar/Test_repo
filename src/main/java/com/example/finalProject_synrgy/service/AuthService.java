@@ -12,6 +12,8 @@ public interface AuthService {
 
     User register(RegisterRequest request);
 
+    boolean verifyUser(String token);
+
     LoginResponse login(LoginRequest request);
 
     Object sendEmailOtp(EmailRequest request, String subject);

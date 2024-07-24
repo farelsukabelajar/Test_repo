@@ -69,18 +69,25 @@ public class UserServiceImpl implements UserService {
         user.setUsername(userRequest.getUsername());
         user.setEmailAddress(userRequest.getEmailAddress());
         user.setPassword(encoder.encode(userRequest.getPassword()));
-
+    
         if (userRepository.existsByEmailAddress(userRequest.getEmailAddress())) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Email already exist");
         }
-
+    
         if (userRepository.existsByUsername(userRequest.getUsername())) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Username already exist");
         }
         userRepository.save(user);
-
+    
+        try {
+            sendRegistrationConfirmationEmail(user);
+        } catch (MessagingException e) {
+            throw new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR, "Failed to send verification email");
+        }
+    
         return userMapper.toUserResponse(user);
     }
+    
 
     @Override
     public List<UserResponse> findAll(Pageable pageable, String username, String emailAddress) {
@@ -154,36 +161,39 @@ public class UserServiceImpl implements UserService {
     }
 
     @Override
-    public void sendRegistrationConfirmationEmail(User user) throws
-    MessagingException {
-    // Generate the token
-    String tokenValue = new
-    String(Base64.encodeBase64URLSafe(DEFAULT_TOKEN_GENERATOR.generateKey()),
-    US_ASCII);
-    EmailConfirmationToken emailConfirmationToken = new EmailConfirmationToken();
-    emailConfirmationToken.setToken(tokenValue);
-    emailConfirmationToken.setTimeStamp(LocalDateTime.now());
-    emailConfirmationToken.setUser(user);
-    emailConfirmationTokenRepository.save(emailConfirmationToken);
-    // Send email
-    emailService.sendConfirmationEmail(emailConfirmationToken);
+    public void sendRegistrationConfirmationEmail(User user) throws MessagingException {
+        // Generate the token
+        String tokenValue = new String(Base64.encodeBase64URLSafe(DEFAULT_TOKEN_GENERATOR.generateKey()),
+                US_ASCII);
+        EmailConfirmationToken emailConfirmationToken = new EmailConfirmationToken();
+        emailConfirmationToken.setToken(tokenValue);
+        emailConfirmationToken.setTimeStamp(LocalDateTime.now());
+        emailConfirmationToken.setUser(user);
+        emailConfirmationTokenRepository.save(emailConfirmationToken);
+    
+        // Log before sending email
+        log.info("Sending verification email to: {}", user.getEmailAddress());
+    
+        // Send email
+        emailService.sendConfirmationEmail(emailConfirmationToken);
+    
+        // Log after sending email
+        log.info("Verification email sent to: {}", user.getEmailAddress());
     }
+    
 
     @Override
     public boolean verifyUser(String token) throws InvalidTokenException {
-    EmailConfirmationToken emailConfirmationToken =
-    emailConfirmationTokenRepository.findByToken(token);
-    if(Objects.isNull(emailConfirmationToken) ||
-    !token.equals(emailConfirmationToken.getToken())){
-    throw new InvalidTokenException("Token is not valid");
-    }
-    User user = emailConfirmationToken.getUser();
-    if (Objects.isNull(user)){
-    return false;
-    }
-    user.setAccountVerified(true);
-    userRepository.save(user);
-    emailConfirmationTokenRepository.delete(emailConfirmationToken);
-    return true;
+        EmailConfirmationToken emailConfirmationToken = emailConfirmationTokenRepository.findByToken(token);
+        if (emailConfirmationToken == null) {
+            return false;
+        }
+        User user = emailConfirmationToken.getUser();
+        if (user.isEnabled()) {
+            return false; // Token sudah pernah diverifikasi
+        }
+        user.setEnabled(true);
+        userRepository.save(user);
+        return true;
     }
 }
